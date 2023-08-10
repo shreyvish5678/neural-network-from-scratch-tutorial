@@ -87,6 +87,15 @@ class activation_softmax_loss_catergorical_crossentropy():
         #calculate gradient for loss function, with respect to softmax, so just subtract one from confidence of correct class
         self.dinputs[range(samples), y_true] -= 1
         self.dinputs = self.dinputs / samples
+      
+'''Explanation on softmax_loss gradient
+Using some calculus, we get that the value in the gradient for correct classes, is just the 
+probability of the correct class minus 1, and for incorrect classes, there is no change, so we can
+represent it as partial derivative of softmax_loss with respect to input = p - y
+where p is the predicted probabilities, and y is the one-hot encoded label.
+The gradient measures the difference between the predicted probabilities and true labels.
+If the prediction is perfect, the gradient is zero, meaning  no change is needed.
+If the prediction is incorrect, the gradient will push the output in the direction that reduces the error.'''
 
 #define dense layer with 784 input neurons, for each pixel in picture, and 128 output neurons
 dense1 = layer_Dense(784, 128)
