@@ -1,6 +1,5 @@
-from tensorflow.keras import datasets #dataset
+from tensorflow.keras import datasets #only using tensorflow to load dataset
 import numpy as np #easy for computations
-from sklearn.utils import shuffle #to shuffle dataset
 (X_train, y_train), (X_test, y_test) = datasets.mnist.load_data() #get dataset
 #convert an image array into vector
 X_train = X_train.reshape(X_train.shape[0], -1)
@@ -19,7 +18,7 @@ class layer_Dense: #dense class
     self.output = np.dot(inputs, self.weights) + self.biases
   def backprop(self, dvalues):
     #use the law of partial derivative of multiplication to calculate gradients
-    self.dweights = np.dot(self.inputs.T, dvalues) 
+    self.dweights = np.dot(self.inputs.T, dvalues) #transpose so dot product can be computed
     self.dinputs = np.dot(dvalues, self.weights.T) 
     #use the law of partial derivative of addition to calculate bias gradient
     self.dbiases = np.sum(dvalues, axis=0, keepdims=True)
@@ -107,7 +106,11 @@ batch_size = 32 #how many samples per batch
 learning_rate = 0.001 #how fast to move towards calculated minimum loss function
 
 for epoch in range(epochs):  #define loop to train 
-    X_train, y_train = shuffle(X_train, y_train) #shuffle data
+    indices = np.arange(len(X_train)) #get an ordered list of the vectors in X_train
+    np.random.shuffle(indices) #shuffle them around
+    #apply shuffled indices to shuffle data
+    X_train = X_train[indices] 
+    y_train = y_train[indices]
     
     for i in range(0, len(X_train), batch_size): #now go through the data, stepping by batch_size
       #extract batch
@@ -154,3 +157,26 @@ print(f'Test Loss: {test_loss:.4f}') #print test loss
 predictions = np.argmax(softmax_loss.output, axis=1) #get predictions from softmax
 accuracy = np.mean(predictions == y_test) #compare to actual labels to get accuracy
 print(f'Test Accuracy: {accuracy * 100:.2f}%') #print accuracy
+
+from PIL import Image #for image manipulation
+import matplotlib.pyplot as plt #to display image
+#define image path and open image
+img_path = 'ENTER YOUR IMAGE PATH HERE'
+img = Image.open(img_path)
+#plot image
+plt.imshow(img) 
+plt.show()
+img = img.resize((28, 28)) #resize to 28x28, since we trained our model on that
+img = img.convert('L') #grayscale the image
+img = np.array(img) #now convert to array
+img = img.reshape(1, -1) #flatten the image array into a vector
+softmax = activation_Softmax() #define softmax layer for predictions
+
+#forward pass on image
+dense1.forward(img)
+relu1.forward(dense1.output)
+dense2.forward(relu1.output)
+relu2.forward(dense2.output)
+dense3.forward(relu2.output)
+softmax.forward(dense3.output)
+print(f'Number is {np.argmax(softmax.output)}')
