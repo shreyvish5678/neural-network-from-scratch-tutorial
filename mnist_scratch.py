@@ -1,6 +1,11 @@
-from tensorflow.keras import datasets 
+import pickle
 import numpy as np  
-(X_train, y_train), (X_test, y_test) = datasets.mnist.load_data()
+
+with open('train.p', 'rb') as f:
+    X_train, y_train = pickle.load(f)
+with open('test.p', 'rb') as f:
+  X_test, y_test = pickle.load(f)
+
 X_train = X_train.reshape(X_train.shape[0], -1)
 X_test = X_test.reshape(X_test.shape[0], -1)
 
@@ -80,7 +85,7 @@ dense3 = layer_Dense(64, 10)
 softmax_loss = activation_softmax_loss_catergorical_crossentropy() 
 optimizer = Optimizer_SGD(learning_rate=0.001)
 
-epochs = 20 
+epochs = 15 
 batch_size = 32  
 
 for epoch in range(epochs): 
@@ -116,7 +121,7 @@ for epoch in range(epochs):
     optimizer.update_params(dense2)
     optimizer.update_params(dense3)
         
-  print(f'Epoch {epoch+1}/{epochs}, Loss: {loss:.4f}, Accuracy: {accuracy:.4f}, LR: {optimizer.current_learning_rate:.5f}')
+  print(f'Epoch {epoch+1}/{epochs}, Loss: {loss:.4f}, Accuracy: {accuracy * 100:.2f}%')
 
 dense1.forward(X_test)
 relu1.forward(dense1.output)
