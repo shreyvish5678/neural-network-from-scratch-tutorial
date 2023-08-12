@@ -1,8 +1,12 @@
-from tensorflow.keras import datasets #only using tensorflow to load dataset
+import pickle #to load dataset
 import numpy as np #for computations
-from PIL import Image #for image manipulation
-import matplotlib.pyplot as plt #to display image
-(X_train, y_train), (X_test, y_test) = datasets.mnist.load_data() #get dataset
+
+#load dataset
+with open('train.p', 'rb') as f:
+    X_train, y_train = pickle.load(f)
+with open('test.p', 'rb') as f:
+  X_test, y_test = pickle.load(f)
+
 #convert an image array into vector
 X_train = X_train.reshape(X_train.shape[0], -1)
 X_test = X_test.reshape(X_test.shape[0], -1)
