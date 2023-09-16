@@ -220,8 +220,6 @@ def save_model(file, input_model):
       model_list.append([layer.weights, layer.biases])
     elif isinstance(layer, ReLu):
       model_list.append([0])
-    elif isinstance(layer, Dropout):
-      model_list.append([1])
   with open(file, 'wb') as f:
     pickle.dump(model_list, f)
 def load_model(file):
@@ -231,8 +229,6 @@ def load_model(file):
   for layer_list in model_list:
     if layer_list[0] == 0:
       model.append(ReLu())
-    elif layer_list[0] == 1:
-      model.append(Dropout())
     elif len(layer_list) == 2:
       layer_weights = np.array(layer_list[0])
       layer_biases = np.array(layer_list[1])
