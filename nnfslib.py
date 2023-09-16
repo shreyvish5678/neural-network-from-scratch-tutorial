@@ -1,7 +1,6 @@
 import numpy as np
 from tqdm import tqdm
 import pickle
-
 class Dense:
   def __init__(self, input_neurons, output_neurons):
     self.weights = 0.1*np.random.randn(input_neurons, output_neurons)
@@ -13,7 +12,6 @@ class Dense:
     self.dinputs = np.dot(dvalues, self.weights.T)
     self.dweights = np.dot(self.inputs.T, dvalues)
     self.dbiases = np.sum(dvalues, axis=0, keepdims=True)
-
 class ReLu:
   def forward(self, inputs):
     self.inputs = inputs
@@ -21,23 +19,49 @@ class ReLu:
   def backprop(self, dvalues):
     self.dinputs = dvalues.copy()
     self.dinputs[self.inputs <= 0] = 0
-
+class Sigmoid:
+  def forward(self, inputs):
+    self.inputs = inputs
+    self.output = 1 / (1 + np.exp(-inputs))
+  def backprop(self, dvalues):
+    self.dinputs = dvalues * self.inputs * (1 - self.inputs)
+class Loss_Binary:
+  def forward(self, y_pred, y_true):
+    y_pred = np.clip(y_pred, 1e-7, 1 - 1e-7)
+    sample_losses = -(y_true * np.log(y_pred) + (1 - y_true) * np.log(1 - y_pred))
+    sample_losses = np.mean(sample_losses, axis=-1)
+    return -np.mean(np.log(sample_losses))
+  def backprop(self, dvalues, y_true):
+    samples = len(dvalues)
+    outputs = len(dvalues[0])
+    dvalues = np.clip(dvalues, 1e-7, 1 - 1e-7)
+    self.dinputs = -(y_true / dvalues - (1 - y_true) / (1 - dvalues)) / outputs
+    self.dinputs /= samples
+class Sigmoid_Loss:
+  def __init__(self):
+    self.activation = Sigmoid()
+    self.loss = Loss_Binary()
+  def forward(self, inputs):
+    self.activation.forward(inputs)
+    self.output = self.activation.output
+  def backward(self, dvalues, y_true):
+    self.loss.backprop(dvalues, y_true)
+    self.dinputs = self.loss.dinputs
+    self.activation.backprop(self.dinputs)
 class Softmax:
   def forward(self, inputs):
     exp_values = np.exp(inputs - np.max(inputs, axis=1, keepdims=True))
     self.output = exp_values / np.sum(exp_values, axis=1, keepdims=True)
-
-class Loss:
+class Loss_CC:
   def calculate(self, y_pred, y_true):
     samples = len(y_pred)
     y_pred = np.clip(y_pred, 1e-7, 1-1e-7)
     correct_confidences = y_pred[range(samples), y_true]
     return -np.mean(np.log(correct_confidences))
-
 class Softmax_Loss:
   def __init__(self):
     self.activation = Softmax()
-    self.loss = Loss()
+    self.loss = Loss_CC()
   def forward(self, inputs, y_true):
     self.activation.forward(inputs)
     self.output = self.activation.output
@@ -47,7 +71,6 @@ class Softmax_Loss:
     self.dinputs = dvalues.copy()
     self.dinputs[range(samples), y_true] -= 1
     self.dinputs /= samples
-
 class Optimizer_GD:
   def __init__(self, learning_rate=0.001, decay=0., momentum=0.):
     self.learning_rate = learning_rate
@@ -72,7 +95,6 @@ class Optimizer_GD:
     layer.weights += weight_updates
     layer.biases += bias_updates
     self.iterations += 1
-
 class Optimizer_RMSProp:
   def __init__(self, learning_rate=0.001, epsilon=1e-7, rho=0.9, decay=0.):
     self.learning_rate = learning_rate
@@ -90,7 +112,7 @@ class Optimizer_RMSProp:
     layer.bias_cache = self.rho * layer.bias_cache + (1 - self.rho) * layer.dbiases ** 2
     layer.weights -= self.current_learning_rate * layer.dweights / np.sqrt(layer.weight_cache + self.epsilon)
     layer.biases -= self.current_learning_rate * layer.dbiases / np.sqrt(layer.bias_cache + self.epsilon)
-
+    self.iterations += 1
 class Optimizer_Adam:
   def __init__(self, epsilon=1e-7, learning_rate=0.001, beta_1=0.9, beta_2=0.999, decay=0.):
     self.learning_rate = learning_rate
@@ -118,84 +140,99 @@ class Optimizer_Adam:
     bias_cache_corrected = layer.bias_cache / (1 - self.beta_2 ** (self.iterations + 1))
     layer.weights -= self.current_learning_rate * weight_momentums_corrected / (np.sqrt(weight_cache_corrected) + self.epsilon)
     layer.biases -= self.current_learning_rate * bias_momentums_corrected / (np.sqrt(bias_cache_corrected) + self.epsilon)
-
-def train_model(model, optimizer, epochs, batch_size, X_train, y_train):
-  softmax_loss = Softmax_Loss()
+    self.iterations += 1
+def train_model(input_model, X_train, y_train, epochs, batch_size, optimizer):
+  model = input_model[0]
+  activation = input_model[1]
+  if activation == "Softmax":
+    loss_function = Softmax_Loss()
+  elif activation == "Sigmoid":
+    loss_function = Sigmoid_Loss()
+  if optimizer == 'SGD':
+    optimizer_function = Optimizer_GD()
+  elif optimizer == 'RMS':
+    optimizer_function = Optimizer_RMSProp()
+  elif optimizer == 'Adam':
+    optimizer_function = Optimizer_Adam()
+  else:
+    optimizer_function = optimizer
   for epoch in range(epochs):
     indices = np.arange(len(X_train))
     np.random.shuffle(indices)
     X_train, y_train = X_train[indices], y_train[indices]
-    
     for i in tqdm(range(0, len(X_train), batch_size), desc=f'Epoch {epoch+1}', ncols=100):
       X_batch, y_batch = X_train[i:i+batch_size], y_train[i:i+batch_size]
-      
       for num in range(len(model)):
         if num == 0:
           model[num].forward(X_batch)
         else:
           model[num].forward(model[num - 1].output)
-      loss = softmax_loss.forward(model[-1].output, y_batch)
-
-      predictions = np.argmax(softmax_loss.output, axis=1)
+      loss = loss_function.forward(model[-1].output, y_batch)
+      predictions = np.argmax(loss_function.output, axis=1)
       accuracy = np.mean(predictions == y_batch)
-
-      softmax_loss.backprop(softmax_loss.output, y_batch)
+      loss_function.backprop(loss_function.output, y_batch)
       backprop_model = model[::-1]
       for num in range(len(backprop_model)):
         if num == 0:
-          backprop_model[num].backprop(softmax_loss.dinputs)
+          backprop_model[num].backprop(loss_function.dinputs)
         else:
           backprop_model[num].backprop(backprop_model[num - 1].dinputs)
-
       for layer in model:
         if isinstance(layer, Dense):
-          optimizer.update_params(layer)
-
+          optimizer_function.update_params(layer)
     print(f'Loss: {loss:.5f}, Accuracy: {accuracy * 100:.2f}%')
-
-def eval_model(model, X_test, y_test):
-  softmax_loss = Softmax_Loss()
+def eval_model(input_model, X_test, y_test):
+  model = input_model[0]
+  activation = input_model[1]
+  if activation == "Softmax":
+    loss_function = Softmax_Loss()
+  elif activation == "Sigmoid":
+    loss_function = Sigmoid_Loss()
   for num in range(len(model)):
     if num == 0:
       model[num].forward(X_test)
     else:
       model[num].forward(model[num - 1].output)
-
-  test_loss = softmax_loss.forward(model[-1].output, y_test)
+  test_loss = loss_function.forward(model[-1].output, y_test)
   print(f'Test Loss: {test_loss:.5f}') 
-
-  predictions = np.argmax(softmax_loss.output, axis=1) 
+  predictions = np.argmax(loss_function.output, axis=1) 
   accuracy = np.mean(predictions == y_test)
   print(f'Test Accuracy: {accuracy * 100:.2f}%')
-
-def predict_model(data, model):
-  softmax = Softmax()
+def predict_model(data, input_model):
+  model = input_model[0]
+  activation = input_model[1]
+  if activation == "Softmax":
+    activation_function = Softmax()
+  elif activation == "Sigmoid":
+    activation_function = Sigmoid()
   for num in range(len(model)):
     if num == 0:
       model[num].forward(data)
     else:
       model[num].forward(model[num - 1].output)
-  softmax_preds = softmax.forward(model[-1].output)
-  return np.argmax(softmax_preds)
-  
-
-def save_model(file, model):
+  predictions = activation_function.forward(model[-1].output)
+  return predictions
+def save_model(file, input_model):
+  model = input_model[0]
   model_list = []
   for layer in model:
     if isinstance(layer, Dense):
       model_list.append([layer.weights, layer.biases])
     elif isinstance(layer, ReLu):
       model_list.append([0])
+    elif isinstance(layer, Dropout):
+      model_list.append([1])
   with open(file, 'wb') as f:
     pickle.dump(model_list, f)
-
 def load_model(file):
   model = []
   with open(file, 'rb') as f:
     model_list = pickle.load(f)
   for layer_list in model_list:
-    if len(layer_list) == 1:
+    if layer_list[0] == 0:
       model.append(ReLu())
+    elif layer_list[0] == 1:
+      model.append(Dropout())
     elif len(layer_list) == 2:
       layer_weights = np.array(layer_list[0])
       layer_biases = np.array(layer_list[1])
