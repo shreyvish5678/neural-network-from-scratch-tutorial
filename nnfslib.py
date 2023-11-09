@@ -3,11 +3,15 @@ from tqdm import tqdm
 import pickle
 
 class Dense:
-  def __init__(self, input_neurons, output_neurons):
-    self.weights = 0.1*np.random.randn(input_neurons, output_neurons)
+  def __init__(self, output_neurons):
+    self.output_size = output_neurons
+    self.weights = []
     self.biases = np.zeros((1, output_neurons))
   def forward(self, inputs):
     self.inputs = inputs
+    _, input_size = inputs.shape
+    if len(self.weights) == 0:
+      self.weights = 0.1*np.random.randn(input_size, self.output_size)
     self.output = np.dot(inputs, self.weights) + self.biases
   def backprop(self, dvalues):
     self.dinputs = np.dot(dvalues, self.weights.T)
@@ -30,11 +34,11 @@ class Sigmoid:
     self.dinputs = dvalues * self.inputs * (1 - self.inputs)
 
 class Loss_Binary:
-  def forward(self, y_pred, y_true):
+  def calculate(self, y_pred, y_true):
     y_pred = np.clip(y_pred, 1e-7, 1 - 1e-7)
     sample_losses = -(y_true * np.log(y_pred) + (1 - y_true) * np.log(1 - y_pred))
-    sample_losses = np.mean(sample_losses, axis=-1)
-    return -np.mean(np.log(sample_losses))
+    sample_losses = np.mean(sample_losses, axis=1)
+    return np.mean(sample_losses)
   
   def backprop(self, dvalues, y_true):
     samples = len(dvalues)
@@ -47,10 +51,11 @@ class Sigmoid_Loss:
   def __init__(self):
     self.activation = Sigmoid()
     self.loss = Loss_Binary()
-  def forward(self, inputs):
+  def forward(self, inputs, y_true):
     self.activation.forward(inputs)
     self.output = self.activation.output
-  def backward(self, dvalues, y_true):
+    return self.loss.calculate(self.output, y_true)
+  def backprop(self, dvalues, y_true):
     self.loss.backprop(dvalues, y_true)
     self.dinputs = self.loss.dinputs
     self.activation.backprop(self.dinputs)
@@ -75,14 +80,59 @@ class Softmax_Loss:
     self.activation.forward(inputs)
     self.output = self.activation.output
     return self.loss.calculate(self.output, y_true)
-  
   def backprop(self, dvalues, y_true):
     samples = len(dvalues)
     self.dinputs = dvalues.copy()
     self.dinputs[range(samples), y_true] -= 1
     self.dinputs /= samples
 
-class Optimizer_GD:
+class Loss_RMSE:
+  def calculate(self, inputs, y_true):
+    self.output = inputs
+    sample_losses = np.mean((y_true - inputs)**2, axis=0)
+    return np.mean(sample_losses)
+  
+  def backprop(self, dvalues, y_true):
+    samples = len(dvalues)
+    outputs = len(dvalues[0])
+    self.dinputs = -2 * (y_true - dvalues) / outputs
+    self.dinputs /= samples
+
+class Linear:
+  def forward(self, inputs):
+    self.output = inputs
+  def backprop(self, dvalues):
+    self.dinputs = dvalues
+
+class Regression_Loss:
+  def __init__(self):
+    self.activation = Linear()
+    self.loss = Loss_RMSE()
+  def forward(self, inputs, y_true):
+    self.activation.forward(inputs)
+    self.output = self.activation.output
+    return self.loss.calculate(self.output, y_true)
+  def backprop(self, dvalues, y_true):
+    self.loss.backprop(dvalues, y_true)
+    self.dinputs = self.loss.dinputs
+    self.activation.backprop(self.dinputs)
+  def find_r2score(self, y_true, y_pred):
+    y_mean = np.mean(y_true)
+    tss = np.sum((y_true - y_mean) ** 2)
+    rss = np.sum((y_true - y_pred) ** 2)
+    return 1 - (rss / tss)
+
+class Dropout:
+  def __init__(self, rate):
+    self.rate = 1 - rate
+  def forward(self, inputs):
+    self.inputs = inputs
+    self.binary_mask = np.random.binomial(1, self.rate, size=inputs.shape) / self.rate
+    self.output = inputs * self.binary_mask
+  def backprop(self, dvalues):
+    self.dinputs = dvalues * self.binary_mask
+
+class GD:
   def __init__(self, learning_rate=0.001, decay=0., momentum=0.):
     self.learning_rate = learning_rate
     self.current_learning_rate = learning_rate
@@ -109,7 +159,7 @@ class Optimizer_GD:
     layer.biases += bias_updates
     self.iterations += 1
 
-class Optimizer_RMSProp:
+class RMSProp:
   def __init__(self, learning_rate=0.001, epsilon=1e-7, rho=0.9, decay=0.):
     self.learning_rate = learning_rate
     self.epsilon = epsilon
@@ -130,7 +180,7 @@ class Optimizer_RMSProp:
     layer.biases -= self.current_learning_rate * layer.dbiases / np.sqrt(layer.bias_cache + self.epsilon)
     self.iterations += 1
 
-class Optimizer_Adam:
+class Adam:
   def __init__(self, epsilon=1e-7, learning_rate=0.001, beta_1=0.9, beta_2=0.999, decay=0.):
     self.learning_rate = learning_rate
     self.epsilon = epsilon
@@ -169,12 +219,14 @@ def train_model(input_model, X_train, y_train, epochs, batch_size, optimizer):
     loss_function = Softmax_Loss()
   elif activation == "Sigmoid":
     loss_function = Sigmoid_Loss()
+  elif activation == "None":
+    loss_function = Regression_Loss()
   if optimizer == 'SGD':
-    optimizer_function = Optimizer_GD()
+    optimizer_function = GD()
   elif optimizer == 'RMS':
-    optimizer_function = Optimizer_RMSProp()
+    optimizer_function = RMSProp()
   elif optimizer == 'Adam':
-    optimizer_function = Optimizer_Adam()
+    optimizer_function = Adam()
   else:
     optimizer_function = optimizer
 
@@ -182,8 +234,7 @@ def train_model(input_model, X_train, y_train, epochs, batch_size, optimizer):
     indices = np.arange(len(X_train))
     np.random.shuffle(indices)
     X_train, y_train = X_train[indices], y_train[indices]
-
-    for i in tqdm(range(0, len(X_train), batch_size), desc=f'Epoch {epoch+1}', ncols=100):
+    for i in tqdm(range(0, len(X_train), batch_size), desc=f'Epoch: {epoch+1}'):
       X_batch, y_batch = X_train[i:i+batch_size], y_train[i:i+batch_size]
       for num in range(len(model)):
         if num == 0:
@@ -192,8 +243,15 @@ def train_model(input_model, X_train, y_train, epochs, batch_size, optimizer):
           model[num].forward(model[num - 1].output)
 
       loss = loss_function.forward(model[-1].output, y_batch)
-      predictions = np.argmax(loss_function.output, axis=1)
-      accuracy = np.mean(predictions == y_batch)
+      if isinstance(loss_function, Regression_Loss):
+        y_batch_flatten = y_batch.flatten()
+        y_pred_flatten = model[-1].output.flatten()
+        accuracy = max(0, loss_function.find_r2score(y_batch_flatten, y_pred_flatten))
+        user = f'Loss: {loss:.5f}, Accuracy: {accuracy * 100:.2f}%'
+      else:
+        predictions = np.argmax(loss_function.output, axis=1)
+        accuracy = np.mean(predictions == y_batch)
+        user = f'Loss: {loss:.5f}, Accuracy: {accuracy * 100:.2f}%'
       loss_function.backprop(loss_function.output, y_batch)
       backprop_model = model[::-1]
 
@@ -205,7 +263,7 @@ def train_model(input_model, X_train, y_train, epochs, batch_size, optimizer):
       for layer in model:
         if isinstance(layer, Dense):
           optimizer_function.update_params(layer)
-    print(f'Loss: {loss:.5f}, Accuracy: {accuracy * 100:.2f}%')
+    print(user)
 
 def eval_model(input_model, X_test, y_test):
   model = input_model[0]
@@ -214,6 +272,8 @@ def eval_model(input_model, X_test, y_test):
     loss_function = Softmax_Loss()
   elif activation == "Sigmoid":
     loss_function = Sigmoid_Loss()
+  elif activation == "None":
+    loss_function = Regression_Loss()
   for num in range(len(model)):
     if num == 0:
       model[num].forward(X_test)
@@ -221,8 +281,13 @@ def eval_model(input_model, X_test, y_test):
       model[num].forward(model[num - 1].output)
   test_loss = loss_function.forward(model[-1].output, y_test)
   print(f'Test Loss: {test_loss:.5f}') 
-  predictions = np.argmax(loss_function.output, axis=1) 
-  accuracy = np.mean(predictions == y_test)
+  if isinstance(loss_function, Regression_Loss):
+    y_test_flatten = y_test.flatten()
+    y_pred_flatten = model[-1].output.flatten()
+    accuracy = loss_function.find_r2score(y_test_flatten, y_pred_flatten)
+  else:
+    predictions = np.argmax(loss_function.output, axis=1) 
+    accuracy = max(0, np.mean(predictions == y_test))
   print(f'Test Accuracy: {accuracy * 100:.2f}%')
 
 def predict_model(data, input_model):
@@ -232,12 +297,15 @@ def predict_model(data, input_model):
     activation_function = Softmax()
   elif activation == "Sigmoid":
     activation_function = Sigmoid()
+  elif activation == "None":
+    activation_function = Linear()
   for num in range(len(model)):
     if num == 0:
       model[num].forward(data)
     else:
       model[num].forward(model[num - 1].output)
-  predictions = activation_function.forward(model[-1].output)
+  activation_function.forward(model[-1].output)
+  predictions = activation_function.output
   return predictions
 
 def save_model(file, input_model):
@@ -247,7 +315,9 @@ def save_model(file, input_model):
     if isinstance(layer, Dense):
       model_list.append([layer.weights, layer.biases])
     elif isinstance(layer, ReLu):
-      model_list.append([0])
+      model_list.append([])
+    elif isinstance(layer, Dropout):
+      model_list.append([1 - layer.rate])
   with open(file, 'wb') as f:
     pickle.dump(model_list, f)
     
@@ -256,12 +326,15 @@ def load_model(file):
   with open(file, 'rb') as f:
     model_list = pickle.load(f)
   for layer_list in model_list:
-    if layer_list[0] == 0:
+    if len(layer_list) == 0:
       model.append(ReLu())
+    elif len(layer_list) == 1:
+      layer_rate = layer_list[0]
+      model.append(Dropout(layer_rate))
     elif len(layer_list) == 2:
       layer_weights = np.array(layer_list[0])
       layer_biases = np.array(layer_list[1])
-      Dense_layer = Dense(layer_weights.shape[0], layer_weights.shape[1])
+      Dense_layer = Dense(layer_weights.shape[1])
       Dense_layer.weights = layer_weights
       Dense_layer.biases = layer_biases
       model.append(Dense_layer)
