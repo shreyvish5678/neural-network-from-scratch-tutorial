@@ -18,6 +18,63 @@ class Dense:
     self.dweights = np.dot(self.inputs.T, dvalues)
     self.dbiases = np.sum(dvalues, axis=0, keepdims=True)
 
+class Conv2D:
+  def __init__(self, num_kernels, kernel_size):
+    self.num_kernels = num_kernels
+    self.kernel_size = kernel_size
+    self.biases = np.zeros((num_kernels,))
+  def forward(self, inputs):
+    self.inputs = inputs
+    self.filters = 0.1*np.random.randn(self.num_kernels, self.kernel_size, self.kernel_size, self.inputs.shape[3])
+    self.output = np.zeros((self.inputs.shape[0], self.inputs.shape[1] - self.filters.shape[1] + 1, self.inputs.shape[2] - self.filters.shape[2] + 1, self.filters.shape[0]))
+    for b in range(self.inputs.shape[0]):
+      for f in range(self.num_kernels):
+        for i in range(self.inputs.shape[1] - self.filters.shape[1] + 1):
+          for j in range(self.inputs.shape[2] - self.filters.shape[2] + 1):
+            for c in range(self.inputs.shape[3]):
+              self.output[b, i, j, f] += np.sum(self.inputs[b, i:i + self.filters.shape[1], j:j + self.filters.shape[2], c] * self.filters[f, :, :, c])     
+        self.output[b, :, :, f] += self.biases[f]   
+  def backprop(self, dvalues):
+    self.dweights = np.zeros_like(self.filters)
+    self.dbiases = np.zeros_like(self.biases)
+    self.dinputs = np.zeros_like(self.inputs)
+    for b in range(self.inputs.shape[0]):
+      for f in range(self.num_kernels):
+        for i in range(self.inputs.shape[1] - self.filters.shape[1] + 1):
+          for j in range(self.inputs.shape[2] - self.filters.shape[2] + 1):
+            for c in range(self.inputs.shape[3]):
+              self.dweights[f, :, :, c] += dvalues[b, i, j, f] * self.inputs[b, i:i + self.filters.shape[1], j:j + self.filters.shape[2], c]
+              self.dinputs[b, i:i + self.filters.shape[1], j:j + self.filters.shape[2], c] += dvalues[b, i, j, f] * self.filters[f, :, :, c]
+              self.dbiases[f] += dvalues[b, i, j, f]
+
+class MaxPooling2D:
+  def __init__(self, pool_size):
+    self.pool_size = pool_size
+  def forward(self, inputs):
+    self.inputs = inputs
+    batch_size, input_height, input_width, input_channels = inputs.shape
+    output_height = input_height // self.pool_size
+    output_width = input_width // self.pool_size
+    self.output = np.zeros((self.inputs.shape[0], self.inputs.shape[1] // self.pool_size, self.inputs.shape[2] // self.pool_size, self.inputs.shape[3]))
+    for b in range(self.inputs.shape[0]):
+      for c in range(self.inputs.shape[3]):
+        for i in range(self.inputs.shape[1] // self.pool_size):
+          for j in range(self.inputs.shape[2] // self.pool_size):
+            start_i, start_j = i * self.pool_size, j * self.pool_size
+            end_i, end_j = start_i + self.pool_size, start_j + self.pool_size
+            patch = inputs[b, start_i:end_i, start_j:end_j, c]
+            self.output[b, i, j, c] = np.max(patch)
+  def backprop(self, dvalues):
+    self.dinputs = np.zeros_like(self.inputs)
+    for b in range(dvalues.shape[0]):
+      for c in range(dvalues.shape[3]):
+        for i in range(dvalues.shape[1]):
+          for j in range(dvalues.shape[2]):
+            start_i, start_j = i * self.pool_size, j * self.pool_size
+            end_i, end_j = start_i + self.pool_size, start_j + self.pool_size
+            patch = self.inputs[b, start_i:end_i, start_j:end_j, c]
+            max_index = np.unravel_index(np.argmax(patch), patch.shape)
+            self.dinputs[b, start_i + max_index[0], start_j + max_index[1], c] = dvalues[b, i, j, c]
 class ReLu:
   def forward(self, inputs):
     self.inputs = inputs
@@ -131,6 +188,14 @@ class Dropout:
     self.output = inputs * self.binary_mask
   def backprop(self, dvalues):
     self.dinputs = dvalues * self.binary_mask
+
+class Flatten:
+    def forward(self, inputs):
+        self.original_shape = inputs.shape
+        self.output = inputs.reshape((inputs.shape[0], -1))
+        return self.output
+    def backprop(self, dvalues):
+        self.dinputs = dvalues.reshape(self.original_shape)
 
 class GD:
   def __init__(self, learning_rate=0.001, decay=0., momentum=0.):
@@ -263,7 +328,7 @@ def train_model(input_model, X_train, y_train, epochs, batch_size, optimizer):
       for layer in model:
         if isinstance(layer, Dense):
           optimizer_function.update_params(layer)
-    print(user)
+      print(user)
 
 def eval_model(input_model, X_test, y_test):
   model = input_model[0]
